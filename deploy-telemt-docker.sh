@@ -146,16 +146,16 @@ mkdir -p "${DEPLOY_DIR}/nginx"
 log "Создание telemt.toml..."
 cat > "${DEPLOY_DIR}/telemt/telemt.toml" <<EOF
 # =============================================================================
-# Telemt — secure MTProto (без TLS, без HTTP)
-# Nginx делает TLS-маску, Telemt получает данные через proxy_pass
+# Telemt — classic MTProto (без TLS, без префиксов)
+# Nginx stream делает TLS-терминацию, Telemt получает чистый MTProto
 # =============================================================================
 
 [general]
 use_middle_proxy = false
 
 [general.modes]
-classic = false
-secure  = true
+classic = true
+secure  = false
 tls     = false
 
 # Публичный адрес для генерации tg:// ссылок
@@ -195,48 +195,30 @@ events {
     multi_accept on;
 }
 
+# Stream-модуль для MTProto (TLS-терминация)
+stream {
+    # MTProto прокси на порту 443
+    server {
+        listen 443 ssl;
+        
+        ssl_certificate     /etc/nginx/certs/fullchain.pem;
+        ssl_certificate_key /etc/nginx/certs/privkey.pem;
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_session_cache   shared:SSL:10m;
+        ssl_session_timeout 10m;
+
+        proxy_pass          telemt:${TELEMT_PORT};
+        proxy_timeout       5m;
+        proxy_connect_timeout 5s;
+    }
+}
+
+# HTTP-модуль для API
 http {
     include      /etc/nginx/mime.types;
     default_type application/octet-stream;
     access_log   /var/log/nginx/access.log;
-
-    # HTTP → HTTPS редирект
-    server {
-        listen 80;
-        server_name ${DOMAIN};
-        return 301 https://\$host\$request_uri;
-    }
-
-    # HTTPS → proxy_pass к Telemt
-    server {
-        listen 443 ssl;
-        server_name ${DOMAIN};
-
-        ssl_certificate     /etc/nginx/certs/fullchain.pem;
-        ssl_certificate_key /etc/nginx/certs/privkey.pem;
-        ssl_protocols       TLSv1.2 TLSv1.3;
-        ssl_prefer_server_ciphers off;
-        ssl_session_cache   shared:SSL:10m;
-        ssl_session_timeout 10m;
-
-        location / {
-            proxy_pass http://telemt:${TELEMT_PORT};
-
-            proxy_http_version 1.1;
-
-            # Данные идут потоком — без буферизации
-            proxy_request_buffering off;
-            proxy_buffering         off;
-
-            proxy_set_header Host       \$host;
-            proxy_set_header Connection "";
-
-            # Долгие MTProto-сессии
-            proxy_read_timeout    3600s;
-            proxy_send_timeout    3600s;
-            proxy_connect_timeout 5s;
-        }
-    }
 
     # HTTPS API — порт 9443 → telemt:9091
     server {
@@ -303,7 +285,6 @@ services:
     depends_on:
       - telemt
     ports:
-      - "80:80"
       - "443:443"
       - "9443:9443"    # HTTPS API
     volumes:
