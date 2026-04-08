@@ -115,8 +115,7 @@ services:
     volumes:
       - ./letsencrypt:/etc/letsencrypt
       - ./webroot:/var/www/certbot
-    entrypoint: /bin/sh
-    command: -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait \$\${!}; done"
+    command: sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait \$\${!}; done"
     networks:
       - certnet
 
@@ -158,11 +157,10 @@ NGINX_STATUS=$(docker inspect --format='{{.State.Status}}' certbot-nginx 2>/dev/
 log "nginx запущен: ${NGINX_STATUS}"
 
 # ─── 9. ПЕРВИЧНЫЙ ВЫПУСК СЕРТИФИКАТА ─────────────────────────────────────────
-sep
 log "Запрос сертификата для ${DOMAIN}..."
 
 # Certbot внутри compose-сети не может делать standalone, используем webroot
-docker compose run --rm certbot certbot certonly \
+docker compose run --rm certbot certonly \
     --webroot \
     --webroot-path /var/www/certbot \
     --non-interactive \
